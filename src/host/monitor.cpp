@@ -61,6 +61,7 @@ struct TelemetryModel {
     uint64_t total_execs = 0;
     uint64_t total_opens = 0;
     uint64_t total_connects = 0;
+    uint64_t total_forks = 0;
     uint64_t total_mte_traps = 0;
     uint64_t total_violations = 0;
 
@@ -68,7 +69,7 @@ struct TelemetryModel {
     std::map<uint64_t, ProcessNode> processes;
     std::vector<uint64_t> root_pids;
 
-    // Scrolling logs
+    // Scrolling logs (30 events capacity)
     std::vector<MonitorEvent> logs;
 
     void add_event(const MonitorEvent& ev) {
@@ -80,7 +81,7 @@ struct TelemetryModel {
 
         // Add to logs
         logs.push_back(ev);
-        if (logs.size() > 12) {
+        if (logs.size() > 30) {
             logs.erase(logs.begin());
         }
 
@@ -88,14 +89,14 @@ struct TelemetryModel {
         if (ev.event_type == EVENT_EXEC) total_execs++;
         else if (ev.event_type == EVENT_OPEN) total_opens++;
         else if (ev.event_type == EVENT_CONNECT) total_connects++;
+        else if (ev.event_type == EVENT_FORK) total_forks++;
         else if (ev.event_type == EVENT_MTE_TRAP) total_mte_traps++;
 
         if (ev.is_sensitive && ev.is_preinstall && ev.event_type == EVENT_OPEN) total_violations++;
         if (ev.is_unauthorized && ev.is_preinstall && ev.event_type == EVENT_CONNECT) total_violations++;
 
         // Process tree updates
-        if (ev.event_type == EVENT_EXEC) {
-            // Check if process already exists
+        if (ev.event_type == EVENT_EXEC || ev.event_type == EVENT_FORK) {
             if (processes.find(ev.pid) == processes.end()) {
                 ProcessNode node{};
                 node.pid = ev.pid;
@@ -106,7 +107,6 @@ struct TelemetryModel {
 
                 processes[ev.pid] = node;
 
-                // Link to parent or treat as root
                 if (ev.ppid != 0 && processes.find(ev.ppid) != processes.end()) {
                     processes[ev.ppid].children.push_back(ev.pid);
                 } else {
@@ -126,14 +126,14 @@ void draw_process_node(const TelemetryModel& model, uint64_t pid, const std::str
     
     std::cout << prefix << (is_last ? "└── " : "├── ");
     
-    // Highlight preinstall processes in yellow
+    // Highlight preinstall processes in yellow/red
     if (node.is_preinstall) {
-        std::cout << YELLOW << BOLD << node.comm << RESET << " (PID: " << node.pid << ")";
+        std::cout << YELLOW << BOLD << node.comm << RESET << " (PID: " << node.pid << ")" << RED << " [UNTRUSTED]" << RESET;
     } else {
         std::cout << GREEN << node.comm << RESET << " (PID: " << node.pid << ")";
     }
     
-    if (!node.arg.empty()) {
+    if (!node.arg.empty() && node.arg != "fork") {
         std::cout << " " << WHITE << "[" << node.arg << "]" << RESET;
     }
     std::cout << "\n";
@@ -147,10 +147,10 @@ void draw_process_node(const TelemetryModel& model, uint64_t pid, const std::str
 void render_dashboard(const TelemetryModel& model) {
     std::cout << CLEAR_SCR;
     std::cout << BOLD << CYAN << "================================================================================\n";
-    std::cout << "                 AarchGate Zero-Trust Sandbox Monitor v1.0                      \n";
+    std::cout << "                 AarchGate Zero-Trust Sandbox Monitor v2.0                      \n";
     std::cout << "================================================================================\n" << RESET;
 
-    // 1. VM Status Panel
+    // 1. VM Status Panel & Risk Score
     std::cout << BOLD << "VM Lifecycle: " << RESET;
     if (model.vm_running) {
         std::cout << GREEN << BOLD << "[RUNNING] " << RESET << "(" << model.vm_status_desc << ")\n";
@@ -166,9 +166,22 @@ void render_dashboard(const TelemetryModel& model) {
         }
     }
 
+    uint32_t risk_score = 0;
+    if (model.total_violations > 0) risk_score = 80 + std::min(static_cast<uint32_t>(model.total_violations * 5), 20U);
+
+    std::cout << BOLD << "Security Risk Score: " << RESET;
+    if (risk_score >= 80) {
+        std::cout << RED << BOLD << risk_score << "/100 [CRITICAL THREAT DETECTED]" << RESET << "\n";
+    } else if (risk_score >= 40) {
+        std::cout << YELLOW << BOLD << risk_score << "/100 [SUSPICIOUS BEHAVIOUR]" << RESET << "\n";
+    } else {
+        std::cout << GREEN << BOLD << risk_score << "/100 [CLEAN WORKSPACE]" << RESET << "\n";
+    }
+
     // 2. Telemetry Statistics
     std::cout << BOLD << "\n[Telemetry Statistics]\n" << RESET;
     std::cout << "  Spawns (EXEC): " << BOLD << model.total_execs << RESET
+              << "   |   Forks: " << BOLD << model.total_forks << RESET
               << "   |   File Opens: " << BOLD << model.total_opens << RESET
               << "   |   Connections: " << BOLD << model.total_connects << RESET << "\n";
     std::cout << "  MTE Traps:     " << BOLD << (model.total_mte_traps > 0 ? RED : GREEN) << model.total_mte_traps << RESET
@@ -187,12 +200,11 @@ void render_dashboard(const TelemetryModel& model) {
     std::cout << "\n--------------------------------------------------------------------------------\n";
 
     // 4. Intercepted Syscall Log Panel
-    std::cout << BOLD << "\n[Real-Time Intercepted Syscall Logs]\n" << RESET;
+    std::cout << BOLD << "\n[Real-Time Intercepted Syscall Logs (Live Stream)]\n" << RESET;
     if (model.logs.empty()) {
         std::cout << "  Awaiting syscall telemetry stream...\n";
     } else {
         for (const auto& log : model.logs) {
-            // Trim comm to 15 chars (TASK_COMM_LEN) for clean display
             std::string comm = std::string(log.comm).substr(0, 15);
 
             std::cout << "  ";
@@ -210,13 +222,17 @@ void render_dashboard(const TelemetryModel& model) {
                           << " PID " << std::setw(5) << log.pid << " "
                           << BOLD << std::left << std::setw(15) << comm << RESET
                           << " -> " << log.arg_str << "\n";
+            } else if (log.event_type == EVENT_FORK) {
+                std::cout << YELLOW << "[FORK]   " << RESET
+                          << " PID " << std::setw(5) << log.pid << " "
+                          << " (PPID " << log.ppid << ") "
+                          << std::left << std::setw(15) << comm << "\n";
             } else if (log.event_type == EVENT_OPEN) {
                 std::cout << CYAN << "[OPEN]   " << RESET
                           << " PID " << std::setw(5) << log.pid << " "
                           << std::left << std::setw(15) << comm
                           << " path: " << log.arg_str << "\n";
             } else if (log.event_type == EVENT_CONNECT) {
-                // Format IPv4 from uint32 if arg_str is empty
                 std::string dest = std::string(log.arg_str);
                 if (dest.empty() || dest == "other_connect") {
                     uint32_t ip = log.ip_address;
