@@ -146,6 +146,16 @@ target_link_libraries(test_phase2_security PRIVATE aarchgate)
 target_compile_options(test_phase2_security PRIVATE ${APEX_COMPILE_FLAGS})
 add_test(NAME Phase2SecurityTests COMMAND test_phase2_security)
 
+# Phase 3 Security tests
+add_executable(test_phase3_security test_phase3_security.cpp)
+target_include_directories(test_phase3_security PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(test_phase3_security PRIVATE aarchgate)
+if(APPLE)
+    target_link_libraries(test_phase3_security PRIVATE "-framework Security" "-framework Foundation")
+endif()
+target_compile_options(test_phase3_security PRIVATE ${APEX_COMPILE_FLAGS})
+add_test(NAME Phase3SecurityTests COMMAND test_phase3_security)
+
 if(APPLE)
     add_executable(test_integration_sandbox
         test_integration_sandbox.cpp

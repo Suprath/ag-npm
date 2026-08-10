@@ -51,10 +51,11 @@ set(APEX_SOURCES
     src/host/policy_engine.cpp
     src/host/audit_log.cpp
     src/host/reputation_scorer.cpp
+    src/host/egress_firewall.cpp
 )
 
 if(APPLE)
-  list(APPEND APEX_SOURCES src/gpu/metal_device.mm)
+  list(APPEND APEX_SOURCES src/gpu/metal_device.mm src/host/keychain_manager.mm)
 endif()
 
 # OBJECT library: shared compilation unit for linking into both SHARED and EXECUTABLE
@@ -185,7 +186,7 @@ set_target_properties(aarchgate PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
 target_link_libraries(aarchgate PRIVATE Threads::Threads)
 
 if(APPLE)
-    target_link_libraries(aarchgate PRIVATE "-framework Metal" "-framework Foundation" "-framework QuartzCore")
+    target_link_libraries(aarchgate PRIVATE "-framework Metal" "-framework Foundation" "-framework QuartzCore" "-framework Security")
 endif()
 
 if(asmjit_FOUND)
