@@ -33,6 +33,8 @@ build_java/
 # Executables
 AarchGate
 /build/AarchGate
+aarchgate_agent
+vm_console.log
 
 # FlatBuffers generated files
 generated/
