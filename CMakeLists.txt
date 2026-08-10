@@ -49,6 +49,7 @@ set(APEX_SOURCES
     src/api/aarchgate_c_api.cpp
     src/telemetry/telemetry.cpp
     src/host/policy_engine.cpp
+    src/host/audit_log.cpp
 )
 
 if(APPLE)

@@ -132,6 +132,13 @@ if(asmjit_FOUND)
 endif()
 add_test(NAME PolicyEngineTests COMMAND test_policy_engine)
 
+# Audit Log tests
+add_executable(test_audit_log test_audit_log.cpp)
+target_include_directories(test_audit_log PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(test_audit_log PRIVATE aarchgate)
+target_compile_options(test_audit_log PRIVATE ${APEX_COMPILE_FLAGS})
+add_test(NAME AuditLogTests COMMAND test_audit_log)
+
 if(APPLE)
     add_executable(test_integration_sandbox
         test_integration_sandbox.cpp

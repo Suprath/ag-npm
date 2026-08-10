@@ -4,6 +4,7 @@
 #include "host/policy_engine.hpp"
 #include "host/vm_controller.h"
 #include "host/esf_manager.hpp"
+#include "host/audit_log.hpp"
 #if defined(__APPLE__)
 #include <CoreFoundation/CoreFoundation.h>
 #endif
@@ -46,8 +47,8 @@ void signal_handler(int signal) {
 // Thread-safe batch collector for JIT Policy Evaluation
 class SyscallBatchCollector {
 public:
-    SyscallBatchCollector(PolicyEngine& pe, VMController& vm, std::function<void(const MonitorEvent&)> cb = nullptr) 
-        : pe_(pe), vm_(vm), monitor_cb_(cb) {
+    SyscallBatchCollector(PolicyEngine& pe, VMController& vm, AuditLog* audit_log = nullptr, std::function<void(const MonitorEvent&)> cb = nullptr) 
+        : pe_(pe), vm_(vm), audit_log_(audit_log), monitor_cb_(cb) {
         // Start processing worker thread
         worker_ = std::thread(&SyscallBatchCollector::process_queue, this);
     }
@@ -87,21 +88,27 @@ public:
             std::cerr << "!!! TERMINATING MICRO-VM SANDBOX IMMEDIATELY...\n";
             std::cerr << std::string(80, '!') << "\n" << std::endl;
 
+            MonitorEvent mon_ev{};
+            mon_ev.timestamp_ns = event.timestamp_ns;
+            mon_ev.pid = event.pid;
+            mon_ev.ppid = event.ppid;
+            mon_ev.event_type = event.event_type;
+            std::strncpy(mon_ev.comm, event.comm, sizeof(mon_ev.comm));
+            std::strncpy(mon_ev.arg_str, event.arg_str, sizeof(mon_ev.arg_str));
+            mon_ev.ip_address = event.ip_address;
+            mon_ev.port = event.port;
+            mon_ev.is_preinstall = 1;
+            mon_ev.is_sensitive = record.is_sensitive;
+            mon_ev.is_unauthorized = record.is_unauthorized;
+            mon_ev.vm_running = 1;
+
+            if (audit_log_) {
+                audit_log_->log_violation(mon_ev, record.is_sensitive ? "Sensitive file read" : "Unauthorized network connection");
+                audit_log_->log_session_end(true, 1);
+            }
+
             // 1. Publish the individual violation event FIRST so monitor shows it
             if (monitor_cb_) {
-                MonitorEvent mon_ev{};
-                mon_ev.timestamp_ns = event.timestamp_ns;
-                mon_ev.pid = event.pid;
-                mon_ev.ppid = event.ppid;
-                mon_ev.event_type = event.event_type;
-                std::strncpy(mon_ev.comm, event.comm, sizeof(mon_ev.comm));
-                std::strncpy(mon_ev.arg_str, event.arg_str, sizeof(mon_ev.arg_str));
-                mon_ev.ip_address = event.ip_address;
-                mon_ev.port = event.port;
-                mon_ev.is_preinstall = 1;
-                mon_ev.is_sensitive = record.is_sensitive;
-                mon_ev.is_unauthorized = record.is_unauthorized;
-                mon_ev.vm_running = 1;
                 monitor_cb_(mon_ev);
             }
 
@@ -124,20 +131,25 @@ public:
             return; // Exit add_event immediately — VM is being terminated
         }
 
+        MonitorEvent mon_ev{};
+        mon_ev.timestamp_ns = event.timestamp_ns;
+        mon_ev.pid = event.pid;
+        mon_ev.ppid = event.ppid;
+        mon_ev.event_type = event.event_type;
+        std::strncpy(mon_ev.comm, event.comm, sizeof(mon_ev.comm));
+        std::strncpy(mon_ev.arg_str, event.arg_str, sizeof(mon_ev.arg_str));
+        mon_ev.ip_address = event.ip_address;
+        mon_ev.port = event.port;
+        mon_ev.is_preinstall = record.is_preinstall;
+        mon_ev.is_sensitive = record.is_sensitive;
+        mon_ev.is_unauthorized = record.is_unauthorized;
+        mon_ev.vm_running = vm_.is_running() ? 1 : 0;
+
+        if (audit_log_) {
+            audit_log_->log_event(mon_ev);
+        }
+
         if (monitor_cb_) {
-            MonitorEvent mon_ev{};
-            mon_ev.timestamp_ns = event.timestamp_ns;
-            mon_ev.pid = event.pid;
-            mon_ev.ppid = event.ppid;
-            mon_ev.event_type = event.event_type;
-            std::strncpy(mon_ev.comm, event.comm, sizeof(mon_ev.comm));
-            std::strncpy(mon_ev.arg_str, event.arg_str, sizeof(mon_ev.arg_str));
-            mon_ev.ip_address = event.ip_address;
-            mon_ev.port = event.port;
-            mon_ev.is_preinstall = record.is_preinstall;
-            mon_ev.is_sensitive = record.is_sensitive;
-            mon_ev.is_unauthorized = record.is_unauthorized;
-            mon_ev.vm_running = vm_.is_running() ? 1 : 0;
             monitor_cb_(mon_ev);
         }
 
@@ -151,6 +163,7 @@ public:
 private:
     PolicyEngine& pe_;
     VMController& vm_;
+    AuditLog* audit_log_;
     std::function<void(const MonitorEvent&)> monitor_cb_;
     std::vector<SyscallTraceRecord> pending_records_;
     std::mutex mutex_;
@@ -279,11 +292,16 @@ int main(int argc, char* argv[]) {
     auto monitor_cb = [](const MonitorEvent&) {};
 #endif
 
-    // 3. Initialize VM Controller
+    // 3. Initialize Audit Logger
+    AuditLog audit_log("sandbox_workspace", "1.0.0");
+    audit_log.log_session_start(kernel_path, initrd_path);
+    std::cout << "[AarchGate Daemon] Persistent audit log active: " << audit_log.log_path() << std::endl;
+
+    // 4. Initialize VM Controller
     VMController vm_controller(kernel_path, initrd_path, share_path);
 
-    // 4. Initialize Batch Collector with Iceoryx callback
-    SyscallBatchCollector batch_collector(policy_engine, vm_controller, monitor_cb);
+    // 5. Initialize Batch Collector with AuditLog and Iceoryx callback
+    SyscallBatchCollector batch_collector(policy_engine, vm_controller, &audit_log, monitor_cb);
 
     // Register event callback for the VSOCK stream
     vm_controller.set_event_callback([&batch_collector](const SyscallEvent& event) {
