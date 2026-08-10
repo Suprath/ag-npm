@@ -147,6 +147,19 @@ SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
         if (arg.find("cgroup") != std::string::npos) cgroup_reads_++;
         if (arg.find("/workspace") != std::string::npos) workspace_reads_++;
 
+        // Wall 2C: Native Addon (.node) dlopen detection
+        bool is_native_addon_proc = false;
+        {
+            std::lock_guard<std::mutex> lock(tree_mutex_);
+            auto proc_it = process_tree_.find(event.pid);
+            if (arg.find(".node") != std::string::npos && proc_it != process_tree_.end()) {
+                proc_it->second.is_native_addon = true;
+            }
+            if (proc_it != process_tree_.end()) {
+                is_native_addon_proc = proc_it->second.is_native_addon;
+            }
+        }
+
         // Classify sensitive paths
         // Match credential and config files — covers both /home/user and /root (Alpine default)
         bool has_sensitive_pattern = false;
@@ -165,7 +178,8 @@ SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
             arg.find("/dev/kmem")          != std::string::npos ||
             arg.find("id_rsa")             != std::string::npos ||
             arg.find("id_ed25519")         != std::string::npos ||
-            arg.find("authorized_keys")    != std::string::npos) {
+            arg.find("authorized_keys")    != std::string::npos ||
+            (is_native_addon_proc && arg.find("/workspace") == std::string::npos && arg.find("/tmp") == std::string::npos)) {
             has_sensitive_pattern = true;
             credential_reads_++;
         }
@@ -259,6 +273,14 @@ void PolicyEngine::register_process(uint64_t pid, uint64_t ppid, const std::stri
     std::lock_guard<std::mutex> lock(tree_mutex_);
     bool is_npm_root = (comm == "npm" || comm == "pnpm" || comm == "yarn" || comm == "bun");
     process_tree_[pid] = ProcessNode{pid, ppid, comm, "", is_npm_root, false, force_preinstall};
+}
+
+void PolicyEngine::register_native_addon(uint64_t pid) {
+    std::lock_guard<std::mutex> lock(tree_mutex_);
+    auto it = process_tree_.find(pid);
+    if (it != process_tree_.end()) {
+        it->second.is_native_addon = true;
+    }
 }
 
 void PolicyEngine::unregister_process(uint64_t pid) {

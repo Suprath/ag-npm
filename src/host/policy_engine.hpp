@@ -33,6 +33,7 @@ struct ProcessNode {
     bool is_npm_root;
     bool is_lifecycle_hook;
     bool is_preinstall_descendant;
+    bool is_native_addon{false};
 };
 
 struct ForensicsReport {
@@ -76,6 +77,13 @@ public:
     // Generates a comprehensive post-install forensics report based on accumulated telemetry
     ForensicsReport generate_report() const;
 
+    // Wall 1C: CI Environment Emulation Mode
+    void set_ci_emulated_mode(bool enable) { is_ci_emulated_mode_ = enable; }
+    bool is_ci_emulated_mode() const { return is_ci_emulated_mode_; }
+
+    // Wall 2C: Native Addon (.node dlopen) Tracking
+    void register_native_addon(uint64_t pid);
+
     // Thread-safe helpers to check process tree status
     bool is_preinstall_process(uint64_t pid);
     void register_process(uint64_t pid, uint64_t ppid, const std::string& comm, bool force_preinstall = false);
@@ -88,6 +96,8 @@ private:
     // Process tree tracking
     std::unordered_map<uint64_t, ProcessNode> process_tree_;
     mutable std::mutex tree_mutex_;
+
+    std::atomic<bool> is_ci_emulated_mode_{false};
 
     // Accumulated Forensics Counters
     mutable std::atomic<uint64_t> total_events_{0};

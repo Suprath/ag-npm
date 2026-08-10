@@ -139,6 +139,13 @@ target_link_libraries(test_audit_log PRIVATE aarchgate)
 target_compile_options(test_audit_log PRIVATE ${APEX_COMPILE_FLAGS})
 add_test(NAME AuditLogTests COMMAND test_audit_log)
 
+# Phase 2 Security tests
+add_executable(test_phase2_security test_phase2_security.cpp)
+target_include_directories(test_phase2_security PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(test_phase2_security PRIVATE aarchgate)
+target_compile_options(test_phase2_security PRIVATE ${APEX_COMPILE_FLAGS})
+add_test(NAME Phase2SecurityTests COMMAND test_phase2_security)
+
 if(APPLE)
     add_executable(test_integration_sandbox
         test_integration_sandbox.cpp

@@ -50,6 +50,7 @@ set(APEX_SOURCES
     src/telemetry/telemetry.cpp
     src/host/policy_engine.cpp
     src/host/audit_log.cpp
+    src/host/reputation_scorer.cpp
 )
 
 if(APPLE)
