@@ -159,6 +159,10 @@ SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
             arg.find("/etc/passwd")        != std::string::npos ||
             arg.find("/etc/shadow")        != std::string::npos ||
             arg.find("/proc/self/environ") != std::string::npos ||
+            (arg.find("/proc/")             != std::string::npos && arg.find("/mem")  != std::string::npos) ||
+            (arg.find("/proc/")             != std::string::npos && arg.find("/maps") != std::string::npos) ||
+            arg.find("/dev/mem")           != std::string::npos ||
+            arg.find("/dev/kmem")          != std::string::npos ||
             arg.find("id_rsa")             != std::string::npos ||
             arg.find("id_ed25519")         != std::string::npos ||
             arg.find("authorized_keys")    != std::string::npos) {
@@ -208,6 +212,31 @@ ForensicsReport PolicyEngine::generate_report() const {
     else report.verdict = "CLEAN";
 
     return report;
+}
+
+bool PolicyEngine::scan_script_content(const std::string& script_content, std::string& out_reason) const {
+    if (script_content.find("eval(") != std::string::npos ||
+        script_content.find("Function(") != std::string::npos ||
+        script_content.find("vm.runInContext") != std::string::npos) {
+        out_reason = "Dynamic code evaluation (eval/Function/vm.runInContext)";
+        return false;
+    }
+
+    if ((script_content.find("Buffer.from(") != std::string::npos || script_content.find("atob(") != std::string::npos) &&
+        (script_content.find("toString('utf8')") != std::string::npos || script_content.find("toString('base64')") != std::string::npos || script_content.find("toString()") != std::string::npos)) {
+        out_reason = "Obfuscated Base64 payload decoding pattern";
+        return false;
+    }
+
+    if (script_content.find(".ssh/") != std::string::npos ||
+        script_content.find(".npmrc") != std::string::npos ||
+        script_content.find(".aws/credentials") != std::string::npos ||
+        script_content.find("id_rsa") != std::string::npos) {
+        out_reason = "Hardcoded credential path reference in script";
+        return false;
+    }
+
+    return true;
 }
 
 uint64_t PolicyEngine::evaluate_batch(const SyscallTraceRecord* records, size_t count) {

@@ -69,6 +69,10 @@ public:
     // Returns a 64-bit mask where each bit represents a violation at that record index.
     uint64_t evaluate_batch(const SyscallTraceRecord* records, size_t count);
 
+    // Static pre-install script scanner (Wall 1B AST / pattern analyzer)
+    // Detects obfuscated eval, base64 decodes, process.env exfiltration before VM execution
+    bool scan_script_content(const std::string& script_content, std::string& out_reason) const;
+
     // Generates a comprehensive post-install forensics report based on accumulated telemetry
     ForensicsReport generate_report() const;
 

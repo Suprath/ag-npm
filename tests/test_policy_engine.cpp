@@ -150,10 +150,29 @@ void test_policy_classification_and_jit_evaluation() {
     std::cout << "✓ test_policy_classification_and_jit_evaluation passed!" << std::endl;
 }
 
+void test_static_script_analyzer() {
+    std::cout << "Running test_static_script_analyzer..." << std::endl;
+    PolicyEngine pe;
+    std::string reason;
+
+    std::string safe_script = "console.log('Building native addon...');";
+    assert(pe.scan_script_content(safe_script, reason) == true);
+
+    std::string eval_script = "eval(Buffer.from('Li5zc2gvaWRfcnNh', 'base64').toString('utf8'));";
+    assert(pe.scan_script_content(eval_script, reason) == false);
+    assert(!reason.empty());
+
+    std::string cred_script = "const key = fs.readFileSync('/root/.ssh/id_rsa');";
+    assert(pe.scan_script_content(cred_script, reason) == false);
+
+    std::cout << "✓ test_static_script_analyzer passed!" << std::endl;
+}
+
 int main() {
     std::cout << "=== AarchGate Sandbox Policy Engine Tests ===" << std::endl;
     test_process_tree_inheritance();
     test_policy_classification_and_jit_evaluation();
+    test_static_script_analyzer();
     std::cout << "✓ All policy engine tests passed!" << std::endl;
     return 0;
 }

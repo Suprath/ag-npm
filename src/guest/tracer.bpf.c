@@ -155,3 +155,36 @@ int trace_connect(struct trace_event_raw_sys_enter* ctx) {
     bpf_ringbuf_submit(ev, 0);
     return 0;
 }
+
+// 4. Hook sendto to catch UDP DNS exfiltration queries (Port 53)
+SEC("tracepoint/syscalls/sys_enter_sendto")
+int trace_sendto(struct trace_event_raw_sys_enter* ctx) {
+    struct sockaddr* addr = (struct sockaddr*)ctx->args[4];
+    if (!addr) return 0;
+
+    short family = 0;
+    bpf_probe_read_kernel(&family, sizeof(family), &addr->sa_family);
+
+    if (family == AF_INET) {
+        struct sockaddr_in addr_in;
+        bpf_probe_read_user(&addr_in, sizeof(addr_in), addr);
+
+        __u16 raw_port = addr_in.sin_port;
+        __u16 port = ((raw_port & 0xff) << 8) | ((raw_port & 0xff00) >> 8);
+
+        // Intercept DNS queries (port 53)
+        if (port == 53) {
+            struct syscall_event_t* ev = bpf_ringbuf_reserve(&rb, sizeof(*ev), 0);
+            if (!ev) return 0;
+
+            fill_common(ev, EVENT_CONNECT);
+            ev->ip_address = addr_in.sin_addr.s_addr;
+            ev->port = 53;
+            __builtin_memcpy(ev->arg_str, "dns_exfil_query", 16);
+
+            bpf_ringbuf_submit(ev, 0);
+        }
+    }
+
+    return 0;
+}
