@@ -207,32 +207,33 @@ public:
     }
 
     void stop() {
-        if (!running) return;
+        bool expected = true;
+        if (!running.compare_exchange_strong(expected, false)) {
+            return; // Already stopping or stopped
+        }
 
         std::cout << "[AarchGate VMController] Stopping VM..." << std::endl;
         stop_reader = true;
 
-        if (vsock_fd != -1) {
-            close(vsock_fd);
-            vsock_fd = -1;
+        int fd = vsock_fd.exchange(-1);
+        if (fd != -1) {
+            close(fd);
         }
 
-        if (reader_thread.joinable()) {
+        if (reader_thread.joinable() && std::this_thread::get_id() != reader_thread.get_id()) {
             reader_thread.join();
         }
 
-        if (mock_thread.joinable()) {
+        if (mock_thread.joinable() && std::this_thread::get_id() != mock_thread.get_id()) {
             mock_thread.join();
         }
 
         if (kernel_path == "mock") {
-            running = false;
             return;
         }
 
         @autoreleasepool {
             if (vm) {
-                // Use std::shared_ptr to safely share synchronization state across languages
                 auto stop_done = std::make_shared<bool>(false);
 
                 [vm stopWithCompletionHandler:^(NSError * _Nullable stopError) {
@@ -245,7 +246,6 @@ public:
                     *stop_done = true;
                 }];
 
-                // Spin-wait while running the main run loop to allow GCD block to execute
                 while (!*stop_done) {
                     [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
                 }
@@ -254,7 +254,6 @@ public:
             vsock_listener = nil;
             vsock_delegate = nil;
         }
-        running = false;
     }
 
     void start_reader(int fd) {
