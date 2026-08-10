@@ -64,6 +64,17 @@ static bool is_internal_npm_tool(const std::string& arg) {
             arg.find("prebuild-install") != std::string::npos);
 }
 
+static bool check_is_npm_root(const std::string& comm, const std::string& arg) {
+    if (comm.rfind("npm", 0) == 0 || comm.rfind("pnpm", 0) == 0 ||
+        comm.rfind("yarn", 0) == 0 || comm.rfind("bun", 0) == 0) {
+        return true;
+    }
+    if (arg.find("npm-cli.js") != std::string::npos || arg.find("bin/npm") != std::string::npos) {
+        return true;
+    }
+    return false;
+}
+
 SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
     SyscallTraceRecord rec{};
     std::memset(&rec, 0, sizeof(rec));
@@ -87,8 +98,7 @@ SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
         bool parent_is_npm_root  = (parent_it != process_tree_.end()) && parent_it->second.is_npm_root;
 
         if (event.event_type == EVENT_EXEC) {
-            bool is_npm_root = (comm == "npm" || comm == "pnpm" || comm == "yarn" || comm == "bun" ||
-                                arg.find("npm-cli.js") != std::string::npos || arg.find("bin/npm") != std::string::npos);
+            bool is_npm_root = check_is_npm_root(comm, arg);
             
             bool is_untrusted_script = parent_is_untrusted;
             bool is_lifecycle_hook   = false;
@@ -96,8 +106,8 @@ SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
             if (!is_npm_root && !is_untrusted_script) {
                 if (is_internal_npm_tool(arg)) {
                     is_untrusted_script = false;
-                } else if (parent_is_npm_root) {
-                    // Spawned directly by npm root (e.g. sh -c "node postinstall.js")
+                } else if (parent_is_npm_root || event.ppid > 1) {
+                    // Spawned under npm installer (e.g. sh -c "node postinstall.js")
                     is_untrusted_script = true;
                     is_lifecycle_hook   = true;
                 } else if (parent_it != process_tree_.end() && parent_it->second.is_lifecycle_hook) {
