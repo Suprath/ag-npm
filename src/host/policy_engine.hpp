@@ -35,6 +35,27 @@ struct ProcessNode {
     bool is_preinstall_descendant;
 };
 
+struct ForensicsReport {
+    uint64_t total_events;
+    uint64_t total_violations;
+    uint64_t proc_reads;
+    uint64_t cgroup_reads;
+    uint64_t credential_reads;
+    uint64_t workspace_reads;
+    uint64_t unix_socket_connects;
+    uint64_t external_ipv4_connects;
+    uint32_t risk_score;  // 0-100
+    std::string verdict;  // "CLEAN", "SUSPICIOUS", "BLOCKED"
+};
+
+struct PackageManagerProfile {
+    std::string name;
+    std::vector<std::string> root_comms;
+    std::vector<std::string> runner_comms;
+    std::vector<std::string> hook_comms;
+    std::vector<std::string> internal_comms;
+};
+
 class PolicyEngine {
 public:
     PolicyEngine();
@@ -48,6 +69,9 @@ public:
     // Returns a 64-bit mask where each bit represents a violation at that record index.
     uint64_t evaluate_batch(const SyscallTraceRecord* records, size_t count);
 
+    // Generates a comprehensive post-install forensics report based on accumulated telemetry
+    ForensicsReport generate_report() const;
+
     // Thread-safe helpers to check process tree status
     bool is_preinstall_process(uint64_t pid);
     void register_process(uint64_t pid, uint64_t ppid, const std::string& comm, bool force_preinstall = false);
@@ -59,7 +83,17 @@ private:
 
     // Process tree tracking
     std::unordered_map<uint64_t, ProcessNode> process_tree_;
-    std::mutex tree_mutex_;
+    mutable std::mutex tree_mutex_;
+
+    // Accumulated Forensics Counters
+    mutable std::atomic<uint64_t> total_events_{0};
+    mutable std::atomic<uint64_t> total_violations_{0};
+    mutable std::atomic<uint64_t> proc_reads_{0};
+    mutable std::atomic<uint64_t> cgroup_reads_{0};
+    mutable std::atomic<uint64_t> credential_reads_{0};
+    mutable std::atomic<uint64_t> workspace_reads_{0};
+    mutable std::atomic<uint64_t> unix_socket_connects_{0};
+    mutable std::atomic<uint64_t> external_ipv4_connects_{0};
 
     // Setup AarchGate Schema & JIT Compiled Expression
     void init_JIT_schema();

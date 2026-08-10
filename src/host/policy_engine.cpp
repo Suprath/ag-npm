@@ -68,6 +68,8 @@ SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
     SyscallTraceRecord rec{};
     std::memset(&rec, 0, sizeof(rec));
 
+    total_events_++;
+
     rec.pid = event.pid;
     rec.ppid = event.ppid;
     rec.event_type = event.event_type;
@@ -131,6 +133,10 @@ SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
 
     // 2. Policy Classification
     if (event.event_type == EVENT_OPEN) {
+        if (arg.find("/proc/") != std::string::npos) proc_reads_++;
+        if (arg.find("cgroup") != std::string::npos) cgroup_reads_++;
+        if (arg.find("/workspace") != std::string::npos) workspace_reads_++;
+
         // Classify sensitive paths
         // Match credential and config files — covers both /home/user and /root (Alpine default)
         bool has_sensitive_pattern = false;
@@ -147,16 +153,51 @@ SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
             arg.find("id_ed25519")         != std::string::npos ||
             arg.find("authorized_keys")    != std::string::npos) {
             has_sensitive_pattern = true;
+            credential_reads_++;
         }
         rec.is_sensitive = has_sensitive_pattern ? 1 : 0;
     } 
     else if (event.event_type == EVENT_CONNECT) {
+        if (event.ip_address == 0) {
+            unix_socket_connects_++;
+        } else {
+            external_ipv4_connects_++;
+        }
         // Zero-Trust Outbound Rule: Preinstall scripts have NO business connecting to the internet.
         // Network connections from a preinstall descendant process are flagged as unauthorized.
         rec.is_unauthorized = is_preinstall_process ? 1 : 0;
     }
 
+    if (rec.is_preinstall && ((rec.event_type == EVENT_OPEN && rec.is_sensitive) || (rec.event_type == EVENT_CONNECT && rec.is_unauthorized))) {
+        total_violations_++;
+    }
+
     return rec;
+}
+
+ForensicsReport PolicyEngine::generate_report() const {
+    ForensicsReport report{};
+    report.total_events = total_events_.load();
+    report.total_violations = total_violations_.load();
+    report.proc_reads = proc_reads_.load();
+    report.cgroup_reads = cgroup_reads_.load();
+    report.credential_reads = credential_reads_.load();
+    report.workspace_reads = workspace_reads_.load();
+    report.unix_socket_connects = unix_socket_connects_.load();
+    report.external_ipv4_connects = external_ipv4_connects_.load();
+
+    uint32_t score = 0;
+    if (report.total_violations > 0) score += 80 + static_cast<uint32_t>(report.total_violations * 5);
+    if (report.credential_reads > 0) score += 15;
+    if (report.external_ipv4_connects > 0) score += 10;
+    if (score > 100) score = 100;
+
+    report.risk_score = score;
+    if (report.total_violations > 0 || score >= 80) report.verdict = "BLOCKED";
+    else if (score >= 40) report.verdict = "SUSPICIOUS";
+    else report.verdict = "CLEAN";
+
+    return report;
 }
 
 uint64_t PolicyEngine::evaluate_batch(const SyscallTraceRecord* records, size_t count) {
