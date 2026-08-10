@@ -14,10 +14,12 @@ constexpr uint32_t VSOCK_TRACE_PORT = 10245;
 constexpr uint32_t VSOCK_SSH_PORT = 10246;
 
 // Syscall event categories monitored by eBPF
-enum EventType : uint32_t {
-    EVENT_EXEC = 1,
-    EVENT_OPEN = 2,
-    EVENT_CONNECT = 3
+enum EventType : uint64_t {
+    EVENT_EXEC    = 1,
+    EVENT_OPEN    = 2,
+    EVENT_CONNECT = 3,
+    EVENT_FORK    = 4,
+    EVENT_MTE_TRAP = 5
 };
 
 // Binary packet structure streamed from the guest to the host.

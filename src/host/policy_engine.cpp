@@ -57,6 +57,13 @@ void PolicyEngine::init_JIT_schema() {
     JIT_engine_.set_expression("SyscallTrace", root, apex::ExecutionMode::BIT_SLICED);
 }
 
+static bool is_internal_npm_tool(const std::string& arg) {
+    return (arg.find("node-gyp") != std::string::npos ||
+            arg.find("node-pre-gyp") != std::string::npos ||
+            arg.find("node-gyp-build") != std::string::npos ||
+            arg.find("prebuild-install") != std::string::npos);
+}
+
 SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
     SyscallTraceRecord rec{};
     std::memset(&rec, 0, sizeof(rec));
@@ -73,37 +80,48 @@ SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
     {
         std::lock_guard<std::mutex> lock(tree_mutex_);
 
-        // Check if parent process is registered and flagged as preinstall
         auto parent_it = process_tree_.find(event.ppid);
         bool parent_is_untrusted = (parent_it != process_tree_.end()) && parent_it->second.is_preinstall_descendant;
+        bool parent_is_npm_root  = (parent_it != process_tree_.end()) && parent_it->second.is_npm_root;
 
         if (event.event_type == EVENT_EXEC) {
-            // Determine if this new process is an untrusted lifecycle script
+            bool is_npm_root = (comm == "npm" || comm == "pnpm" || comm == "yarn" || comm == "bun" ||
+                                arg.find("npm-cli.js") != std::string::npos || arg.find("bin/npm") != std::string::npos);
+            
             bool is_untrusted_script = parent_is_untrusted;
+            bool is_lifecycle_hook   = false;
 
-            // If the parent is the trusted package manager (e.g. npm, node, yarn, pnpm)
-            // but the child being run is a shell (/bin/sh, /bin/bash) or other binary,
-            // it is a lifecycle script entry point.
-            if (!is_untrusted_script && (comm == "sh" || comm == "bash" || comm == "node" || comm == "python")) {
-                // If spawned by the package manager, it's untrusted
-                // Standard detection: check parent name if available (or assume any child of host npm VM execution is untrusted except the guest agent itself)
-                // In guest sandbox VM, the guest daemon itself runs as PID 1/2 or systemd. npm is PID > 10.
-                // Any child spawned by npm (except npm itself) is untrusted.
-                // We'll mark it as untrusted.
-                if (event.ppid > 1) { // Assume spawned by npm installer
+            if (!is_npm_root && !is_untrusted_script) {
+                if (is_internal_npm_tool(arg)) {
+                    is_untrusted_script = false;
+                } else if (parent_is_npm_root) {
+                    // Spawned directly by npm root (e.g. sh -c "node postinstall.js")
+                    is_untrusted_script = true;
+                    is_lifecycle_hook   = true;
+                } else if (parent_it != process_tree_.end() && parent_it->second.is_lifecycle_hook) {
                     is_untrusted_script = true;
                 }
             }
 
-            process_tree_[event.pid] = ProcessNode{event.pid, event.ppid, comm, is_untrusted_script};
+            process_tree_[event.pid] = ProcessNode{
+                event.pid, event.ppid, comm, arg, is_npm_root, is_lifecycle_hook, is_untrusted_script
+            };
             is_preinstall_process = is_untrusted_script;
-        } else {
+        } 
+        else if (event.event_type == EVENT_FORK) {
+            // Process fork() — child inherits preinstall descendant state instantly
+            bool is_untrusted = parent_is_untrusted;
+            process_tree_[event.pid] = ProcessNode{
+                event.pid, event.ppid, comm, "fork", false, false, is_untrusted
+            };
+            is_preinstall_process = is_untrusted;
+        } 
+        else {
             // For OPEN and CONNECT, look up the process's preinstall status
             auto proc_it = process_tree_.find(event.pid);
             if (proc_it != process_tree_.end()) {
                 is_preinstall_process = proc_it->second.is_preinstall_descendant;
             } else {
-                // Fallback to parent state if not in map
                 is_preinstall_process = parent_is_untrusted;
             }
         }
@@ -134,9 +152,8 @@ SyscallTraceRecord PolicyEngine::process_event(const SyscallEvent& event) {
     } 
     else if (event.event_type == EVENT_CONNECT) {
         // Zero-Trust Outbound Rule: Preinstall scripts have NO business connecting to the internet.
-        // Node dependencies are fetched by npm itself, not by install scripts.
-        // Therefore, any network connection from a preinstall descendant is flagged as unauthorized.
-        rec.is_unauthorized = 1;
+        // Network connections from a preinstall descendant process are flagged as unauthorized.
+        rec.is_unauthorized = is_preinstall_process ? 1 : 0;
     }
 
     return rec;
@@ -160,7 +177,8 @@ bool PolicyEngine::is_preinstall_process(uint64_t pid) {
 
 void PolicyEngine::register_process(uint64_t pid, uint64_t ppid, const std::string& comm, bool force_preinstall) {
     std::lock_guard<std::mutex> lock(tree_mutex_);
-    process_tree_[pid] = ProcessNode{pid, ppid, comm, force_preinstall};
+    bool is_npm_root = (comm == "npm" || comm == "pnpm" || comm == "yarn" || comm == "bun");
+    process_tree_[pid] = ProcessNode{pid, ppid, comm, "", is_npm_root, false, force_preinstall};
 }
 
 void PolicyEngine::unregister_process(uint64_t pid) {

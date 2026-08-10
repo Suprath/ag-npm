@@ -29,6 +29,9 @@ struct ProcessNode {
     uint64_t pid;
     uint64_t ppid;
     std::string comm;
+    std::string exec_path;
+    bool is_npm_root;
+    bool is_lifecycle_hook;
     bool is_preinstall_descendant;
 };
 

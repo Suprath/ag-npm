@@ -40,6 +40,31 @@ void test_process_tree_inheritance() {
     SyscallTraceRecord rec_exec_node = pe.process_event(ev_exec_node);
     assert(pe.is_preinstall_process(102) == true);
     assert(rec_exec_node.is_preinstall == 1);
+
+    // 4. Test EVENT_FORK: child process spawned via fork() inherits preinstall state immediately
+    SyscallEvent ev_fork_child{};
+    ev_fork_child.pid = 103;
+    ev_fork_child.ppid = 102;
+    ev_fork_child.event_type = EVENT_FORK;
+    std::strcpy(ev_fork_child.comm, "node");
+    std::strcpy(ev_fork_child.arg_str, "fork");
+
+    SyscallTraceRecord rec_fork_child = pe.process_event(ev_fork_child);
+    assert(pe.is_preinstall_process(103) == true);
+    assert(rec_fork_child.is_preinstall == 1);
+
+    // 5. Test internal npm tool allowlist (e.g. node-gyp build)
+    SyscallEvent ev_nodegyp{};
+    ev_nodegyp.pid = 104;
+    ev_nodegyp.ppid = 100;
+    ev_nodegyp.event_type = EVENT_EXEC;
+    std::strcpy(ev_nodegyp.comm, "node");
+    std::strcpy(ev_nodegyp.arg_str, "/usr/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js");
+
+    SyscallTraceRecord rec_nodegyp = pe.process_event(ev_nodegyp);
+    assert(pe.is_preinstall_process(104) == false);
+    assert(rec_nodegyp.is_preinstall == 0);
+
     std::cout << "✓ test_process_tree_inheritance passed!" << std::endl;
 }
 

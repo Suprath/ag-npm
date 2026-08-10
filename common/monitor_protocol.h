@@ -9,10 +9,11 @@
 #define EVENT_EXEC 1
 #define EVENT_OPEN 2
 #define EVENT_CONNECT 3
+#define EVENT_FORK 4
 #endif
 
-#define EVENT_MTE_TRAP 4
-#define EVENT_VM_STATE_CHANGE 5
+#define EVENT_MTE_TRAP 5
+#define EVENT_VM_STATE_CHANGE 6
 
 namespace aarchgate {
 

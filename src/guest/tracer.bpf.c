@@ -33,6 +33,7 @@ struct syscall_event_t {
 #define EVENT_EXEC 1
 #define EVENT_OPEN 2
 #define EVENT_CONNECT 3
+#define EVENT_FORK 4
 
 // BPF Ring Buffer for lockless user-space streaming
 struct {
@@ -62,9 +63,9 @@ static __always_inline void fill_common(struct syscall_event_t* ev, __u64 type) 
     }
 }
 
-// 1. Hook Execve to track process execution and inherit sandbox context
-SEC("tracepoint/syscalls/sys_enter_execve")
-int trace_execve(struct trace_event_raw_sys_enter* ctx) {
+// 1. Hook sched_process_exec to track process execution after image load (accurate comm & path)
+SEC("tracepoint/sched/sched_process_exec")
+int trace_exec(struct trace_event_raw_sched_process_exec* ctx) {
     struct syscall_event_t* ev;
 
     ev = bpf_ringbuf_reserve(&rb, sizeof(*ev), 0);
@@ -72,9 +73,29 @@ int trace_execve(struct trace_event_raw_sys_enter* ctx) {
 
     fill_common(ev, EVENT_EXEC);
 
-    // Read the executable path (first argument of execve)
-    const char* filename = (const char*)ctx->args[0];
-    bpf_probe_read_user_str(ev->arg_str, sizeof(ev->arg_str), filename);
+    // Read the executable path from the sched_process_exec tracepoint filename
+    bpf_probe_read_kernel_str(ev->arg_str, sizeof(ev->arg_str), (const void*)ctx->filename);
+
+    bpf_ringbuf_submit(ev, 0);
+    return 0;
+}
+
+// 2. Hook sched_process_fork to catch fork() and clone() without execve
+SEC("tracepoint/sched/sched_process_fork")
+int trace_fork(struct trace_event_raw_sched_process_fork* ctx) {
+    struct syscall_event_t* ev;
+
+    ev = bpf_ringbuf_reserve(&rb, sizeof(*ev), 0);
+    if (!ev) return 0;
+
+    fill_common(ev, EVENT_FORK);
+
+    // Override PID and PPID with explicit fork parameters
+    ev->pid = ctx->child_pid;
+    ev->ppid = ctx->parent_pid;
+
+    bpf_probe_read_kernel_str(ev->comm, sizeof(ev->comm), (const void*)ctx->parent_comm);
+    __builtin_memcpy(ev->arg_str, "fork", 5);
 
     bpf_ringbuf_submit(ev, 0);
     return 0;
