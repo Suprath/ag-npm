@@ -33,9 +33,21 @@ struct ReputationResult {
     std::vector<std::string> risk_factors;
 };
 
+struct HotPathDecision {
+    bool eligible;
+    std::string reason; // why eligible or why not
+};
+
 class ReputationScorer {
 public:
     ReputationScorer() = default;
+
+    // Returns true if the package is safe to serve from CARS without a new VM scan.
+    // Conditions: CARS hit + prior clean scan + integrity hash unchanged + reputation score >= 80
+    HotPathDecision is_hot_path_eligible(const PackageMetadata& meta,
+                               const std::string& integrity_hash,
+                               bool cars_hit,
+                               uint32_t reputation_threshold = 80) const;
 
     ReputationResult score_package(const PackageMetadata& meta) const;
     CapabilityPolicy load_capability_policy(const std::string& manifest_json_path) const;

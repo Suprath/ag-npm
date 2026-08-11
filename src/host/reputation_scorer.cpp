@@ -71,4 +71,32 @@ CapabilityPolicy ReputationScorer::load_capability_policy(const std::string& man
     return policy;
 }
 
+HotPathDecision ReputationScorer::is_hot_path_eligible(const PackageMetadata& meta,
+                                                       const std::string& integrity_hash,
+                                                       bool cars_hit,
+                                                       uint32_t reputation_threshold) const {
+    HotPathDecision decision;
+    decision.eligible = false;
+    
+    if (!cars_hit) {
+        decision.reason = "Not a CARS hit";
+        return decision;
+    }
+    
+    ReputationResult res = score_package(meta);
+    if (res.score < reputation_threshold) {
+        decision.reason = "Reputation score below threshold";
+        return decision;
+    }
+    
+    if (!meta.has_sigstore_provenance && res.score < 90) {
+        decision.reason = "Missing sigstore provenance and score below 90";
+        return decision;
+    }
+    
+    decision.eligible = true;
+    decision.reason = "Eligible for hot path";
+    return decision;
+}
+
 } // namespace aarchgate

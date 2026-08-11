@@ -253,6 +253,16 @@ if(APPLE)
         src/host/main.cpp
         src/host/esf_manager.cpp
         src/host/vm_controller.mm
+        # Build Acceleration Engine (T1-T9)
+        src/host/integrity_verifier.cpp
+        src/host/install_manifest.cpp
+        src/host/cars.cpp
+        src/host/file_oracle.cpp
+        src/host/http_cache.cpp
+        src/host/dep_graph.cpp
+        src/host/vm_pool.cpp
+        src/host/vm_snapshot_pool.cpp
+        src/host/fsevent_watcher.mm
     )
     target_include_directories(aarchgate_daemon PRIVATE 
         ${CMAKE_CURRENT_SOURCE_DIR}/include 
@@ -262,8 +272,11 @@ if(APPLE)
     target_link_libraries(aarchgate_daemon PRIVATE 
         aarchgate 
         "-framework Virtualization" 
+        "-framework CoreServices"
+        "-framework CoreFoundation"
         EndpointSecurity 
         "-framework Foundation"
+        "-framework Security"
         iceoryx_hoofs
         iceoryx_posh
     )
@@ -301,4 +314,36 @@ if(APPLE)
     target_compile_definitions(aarchgate_monitor PRIVATE APEX_HAS_ICEORYX)
     
     install(TARGETS aarchgate_monitor DESTINATION bin)
+
+    # Build Acceleration Engine integration tests
+    add_executable(test_build_acceleration
+        tests/test_build_acceleration.cpp
+        src/host/integrity_verifier.cpp
+        src/host/install_manifest.cpp
+        src/host/cars.cpp
+        src/host/file_oracle.cpp
+        src/host/http_cache.cpp
+        src/host/dep_graph.cpp
+        src/host/vm_pool.cpp
+        src/host/vm_snapshot_pool.cpp
+        src/host/vm_controller.mm
+        src/host/fsevent_watcher.mm
+        src/host/reputation_scorer.cpp
+    )
+    target_include_directories(test_build_acceleration PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(test_build_acceleration PRIVATE
+        aarchgate
+        "-framework Virtualization"
+        "-framework CoreServices"
+        "-framework CoreFoundation"
+        "-framework Foundation"
+        "-framework Security"
+        iceoryx_hoofs
+        iceoryx_posh
+    )
+    target_compile_options(test_build_acceleration PRIVATE ${APEX_COMPILE_FLAGS})
 endif()
