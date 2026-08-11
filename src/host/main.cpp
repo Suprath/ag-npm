@@ -269,28 +269,10 @@ int main(int argc, char* argv[]) {
     pthread_jit_write_protect_np(true); // write-protect (make executable-only)
 #endif
 
-#ifdef APEX_HAS_ICEORYX
-    // Initialize Iceoryx Runtime
-    iox::runtime::PoshRuntime::initRuntime("AARCHGATE_DAEMON");
-    iox::popo::Publisher<MonitorEvent> monitor_publisher({
-        iox::capro::IdString_t{iox::TruncateToCapacity, "AarchGate"},
-        iox::capro::IdString_t{iox::TruncateToCapacity, "Sandbox"},
-        iox::capro::IdString_t{iox::TruncateToCapacity, "Telemetry"}
-    });
-
-    auto monitor_cb = [&](const MonitorEvent& mon_ev) {
-        monitor_publisher.loan()
-            .and_then([&](auto& sample) {
-                *sample = mon_ev;
-                sample.publish();
-            })
-            .or_else([&](auto& error) {
-                (void)error;
-            });
+    static SharedMemoryPublisher shm_publisher;
+    auto monitor_cb = [](const MonitorEvent& mon_ev) {
+        shm_publisher.publish(mon_ev);
     };
-#else
-    auto monitor_cb = [](const MonitorEvent&) {};
-#endif
 
     // 3. Initialize Audit Logger
     AuditLog audit_log("sandbox_workspace", "1.0.0");

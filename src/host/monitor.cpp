@@ -19,8 +19,6 @@
 #include <fcntl.h>
 
 #include "common/monitor_protocol.h"
-#include "iceoryx_posh/runtime/posh_runtime.hpp"
-#include "iceoryx_posh/popo/subscriber.hpp"
 
 using namespace aarchgate;
 
@@ -354,21 +352,7 @@ int main() {
     std::cout << HIDE_CURSOR << std::flush;
     RawTerminal raw_term;
 
-    std::cout << "[AarchGate Monitor] Initializing shared-memory runtime..." << std::endl;
-
-    try {
-        iox::runtime::PoshRuntime::initRuntime("AARCHGATE_MONITOR");
-    } catch (...) {
-        std::cerr << "[AarchGate Monitor] ERROR: iox-roudi not running. Start with: iox-roudi\n";
-        std::cout << SHOW_CURSOR;
-        return 1;
-    }
-
-    iox::popo::Subscriber<MonitorEvent> subscriber({
-        iox::capro::IdString_t{iox::TruncateToCapacity, "AarchGate"},
-        iox::capro::IdString_t{iox::TruncateToCapacity, "Sandbox"},
-        iox::capro::IdString_t{iox::TruncateToCapacity, "Telemetry"}
-    });
+    SharedMemorySubscriber subscriber;
 
     TelemetryModel model;
     std::cout << CLEAR_SCR << std::flush;
@@ -430,10 +414,9 @@ int main() {
 
         // ── IPC event consumer ───────────────────────────────────────────────
         bool updated = false;
-        while (true) {
-            auto result = subscriber.take();
-            if (result.has_error()) break;
-            model.add_event(*result.value());
+        MonitorEvent ev;
+        while (subscriber.pop(ev)) {
+            model.add_event(ev);
             updated = true;
         }
 
