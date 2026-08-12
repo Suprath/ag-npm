@@ -16,13 +16,15 @@ AarchGate resolves both challenges simultaneously. It isolates build execution i
 ## Table of Contents
 
 1. [System Architecture](#system-architecture)
-2. [Security Capabilities & Threat Model](#security-capabilities--threat-model)
-3. [Build Acceleration Engine](#build-acceleration-engine)
-4. [Live Benchmark & Performance Profile](#live-benchmark--performance-profile)
-5. [Resource Reduction Matrix](#resource-reduction-matrix)
-6. [Installation & Setup Guide](#installation--setup-guide)
-7. [Usage Documentation & CLI Reference](#usage-documentation--cli-reference)
-8. [Troubleshooting & Diagnostics](#troubleshooting--diagnostics)
+2. [Apple Native Frameworks & Platform Integrations](#apple-native-frameworks--platform-integrations)
+3. [DNS & Network Egress Filtering System](#dns--network-egress-filtering-system)
+4. [Security Capabilities & Threat Model](#security-capabilities--threat-model)
+5. [Build Acceleration Engine](#build-acceleration-engine)
+6. [Live Benchmark & Performance Profile](#live-benchmark--performance-profile)
+7. [Resource Reduction Matrix](#resource-reduction-matrix)
+8. [Installation & Setup Guide](#installation--setup-guide)
+9. [Usage Documentation & CLI Reference](#usage-documentation--cli-reference)
+10. [Troubleshooting & Diagnostics](#troubleshooting--diagnostics)
 
 ---
 
@@ -106,6 +108,67 @@ AarchGate operates across a host macOS control plane and an isolated Linux micro
 
 ---
 
+## Apple Native Frameworks & Platform Integrations
+
+AarchGate relies directly on Apple's native macOS subsystems, hardware cryptoprocessors, and system frameworks rather than third-party emulators.
+
+### Native Framework Matrix
+
+| macOS Framework / Tool | API / Primitive Used | Subsystem Functionality |
+| :--- | :--- | :--- |
+| **`Virtualization.framework`** | `VZVirtualMachine`, `VZVirtioSocketListener`, `VZMacMachineIdentifier` | Manages hardware-accelerated Linux micro-VM instances via Hypervisor.framework without requiring `sudo` or third-party VMs like UTM/QEMU. |
+| **`CoreServices.framework`** | `FSEventStreamCreate`, `FSEventStreamScheduleWithDispatchQueue` | Provides low-latency kernel monitoring of `package.json` file modifications to trigger preemptive background builds. |
+| **`EndpointSecurity.framework`** | `es_new_client`, `es_subscribe` | Acts as host failsafe supervisor, monitoring `aarchgate_daemon` and micro-VM process execution to prevent host process injection or escape. |
+| **`CommonCrypto`** | `CC_SHA512`, `CC_SHA256` | Offloads package integrity verification directly to Apple Silicon's dedicated ARM64 Secure Cryptographic Engine hardware blocks (1.7 GB/s throughput). |
+| **`Grand Central Dispatch (GCD)`** | `dispatch_apply`, `dispatch_queue_create` | Parallelizes hash verification and event stream processing across physical Performance (P) cores. |
+| **`CoreFoundation`** | `CFRunLoopRun`, `CFRunLoopStop` | Controls event loop execution lifecycle inside the host daemon process. |
+| **`Security.framework`** | Keychain Services | Securely stores package signing certificates, Sigstore public keys, and proxy TLS credentials. |
+| **`pthread` W^X Extensions** | `pthread_jit_write_protect_np` | Enforces hardware Write-or-Execute (W^X) memory isolation on compiled JIT policy engine pages to prevent ROP/JOP runtime tampering. |
+
+---
+
+## DNS & Network Egress Filtering System
+
+AarchGate includes an integrated network policy and DNS egress filtering engine to neutralize supply-chain exfiltration and command-and-control (C2) communications.
+
+### Egress Filtering Architecture Diagram
+
+```
++-------------------------------------------------------------------------------+
+|                             GUEST MICRO-VM SANDBOX                            |
+|                                                                               |
+|  [npm / build script] --(sys_enter_connect)--> [eBPF Network Probe]           |
+|                                                         |                     |
++---------------------------------------------------------|---------------------+
+                                                          | Virtio VSOCK Stream
++---------------------------------------------------------v---------------------+
+|                             HOST EGRESS FIREWALL                              |
+|                                                                               |
+|  +-------------------------------------------------------------------------+  |
+|  | EgressFirewall Engine (src/host/egress_firewall.cpp)                    |  |
+|  |                                                                         |  |
+|  |  1. DNS Query Interception & Packet Parsing                             |  |
+|  |  2. Domain Whitelist Evaluation (*.npmjs.org, *.github.com)            |  |
+|  |  3. Hostname-to-IP CIDR Resolution Verification                        |  |
+|  |  4. HTTP Proxy Coalescer & Response Cache (HTTPCache)                   |  |
+|  +-------------------------------------------------------------------------+  |
+|                                     |                                         |
+|                 +-------------------+-------------------+                     |
+|                 |                                       |                     |
+|                 v (Allowed Target)                      v (Blocked Exfiltration)
+|      [Upstream Package Registry]               [TERMINATE VM & AUDIT LOG]     |
++-------------------------------------------------------------------------------+
+```
+
+### Network Rule Enforcements
+
+1. **DNS Query Inspection**: Intercepts UDP/TCP DNS queries on port 53 originating inside the guest VM. Domain names are evaluated against the active project `CapabilityPolicy`.
+2. **Domain Whitelisting**: By default, outbound network access is restricted to verified package registries (`registry.npmjs.org`, `registry.yarnpkg.com`, `cdn.jsdelivr.net`). Unlisted domain queries trigger a security alert.
+3. **Data Exfiltration Prevention**: Prevents malicious `postinstall` scripts from resolving arbitrary external endpoints (such as DNS-tunneling C2 domains or HTTP drop sites).
+4. **Socket Connection Termination**: If an unauthorized IP or non-whitelisted domain connection is attempted, eBPF flags the socket descriptor and the host policy engine issues an immediate VM termination signal.
+
+---
+
 ## Security Capabilities & Threat Model
 
 AarchGate enforces a 4-layer defense system to neutralize malicious package execution without breaking valid build pipelines.
@@ -137,7 +200,7 @@ Layer 4: Host Failsafe (macOS Endpoint Security Framework)
 
 | Threat Vector | Attack Mechanism | Traditional Defense | AarchGate Defense |
 | :--- | :--- | :--- | :--- |
-| **Exfiltration Worms** | Reads `~/.ssh/id_rsa` or `~/.env` during `postinstall` script and sends data via HTTP POST. | Post-incident detection / dynamic analysis. | Blocked at eBPF `connect` hook and `openat` path check. Sandbox has no access to host `$HOME`. |
+| **Exfiltration Worms** | Reads `~/.ssh/id_rsa` or `~/.env` during `postinstall` script and sends data via HTTP POST. | Post-incident detection / dynamic analysis. | Blocked at eBPF `connect` hook, DNS filter, and `openat` path check. Sandbox has no access to host `$HOME`. |
 | **Supply-Chain Malware** | Replaces build output files with obfuscated backdoors during compilation. | Signature verification (bypassed if maintainer key compromised). | Isolated in micro-VM RAM workspace. Real-time file integrity check before flushing to host. |
 | **Ransomware / Purge Scripts** | Executes `rm -rf /` or encrypts host project files. | System backup recovery. | Micro-VM operates on disposable tmpfs. Host filesystem is non-writable by guest. |
 | **Process Tampering / Escape** | Attempts to modify host daemon memory or overwrite JIT rules. | OS ASLR / SIP. | Host JIT memory regions frozen via `pthread_jit_write_protect_np`. EndpointSecurity kills process on unauthorized access. |
