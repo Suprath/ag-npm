@@ -58,12 +58,14 @@ size_t BloomFilter::count_bits_set() const {
 }
 
 void BloomFilter::compute_hashes(const std::string& key, uint64_t& h1, uint64_t& h2, uint64_t& h3) {
-    uint8_t digest[CC_SHA256_DIGEST_LENGTH];
-    CC_SHA256(key.data(), static_cast<CC_LONG>(key.size()), digest);
-
-    std::memcpy(&h1, digest, sizeof(uint64_t));
-    std::memcpy(&h2, digest + 8, sizeof(uint64_t));
-    std::memcpy(&h3, digest + 16, sizeof(uint64_t));
+    uint64_t hash = 14695981039346656037ULL;
+    for (char c : key) {
+        hash ^= static_cast<uint64_t>(c);
+        hash *= 1099511628211ULL;
+    }
+    h1 = hash;
+    h2 = (hash >> 17) | (hash << 47);
+    h3 = (hash >> 31) | (hash << 33);
 }
 
 } // namespace aarchgate
