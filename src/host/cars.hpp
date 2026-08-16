@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <functional>
 
+#include "host/bloom_filter.hpp"
+
 namespace aarchgate {
 
 struct CARSEntry {
@@ -49,6 +51,7 @@ private:
     std::string store_root_;  // ~/.aarchgate/cars/
     mutable std::mutex mutex_;
     std::unordered_map<std::string, CARSEntry> index_; // in-memory index
+    mutable BloomFilter bloom_filter_;                // L1 Bloom Filter bitmask
 
     void load_index();   // scan store_root_ on startup
     void save_index() const;

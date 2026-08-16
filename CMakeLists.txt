@@ -263,6 +263,10 @@ if(APPLE)
         src/host/vm_pool.cpp
         src/host/vm_snapshot_pool.cpp
         src/host/fsevent_watcher.mm
+        # Binary Encoding & Bitwise Engine
+        src/host/bloom_filter.cpp
+        src/host/binary_manifest.cpp
+        src/host/bitwise_policy.cpp
     )
     target_include_directories(aarchgate_daemon PRIVATE 
         ${CMAKE_CURRENT_SOURCE_DIR}/include 
@@ -329,6 +333,9 @@ if(APPLE)
         src/host/vm_controller.mm
         src/host/fsevent_watcher.mm
         src/host/reputation_scorer.cpp
+        src/host/bloom_filter.cpp
+        src/host/binary_manifest.cpp
+        src/host/bitwise_policy.cpp
     )
     target_include_directories(test_build_acceleration PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -346,4 +353,61 @@ if(APPLE)
         iceoryx_posh
     )
     target_compile_options(test_build_acceleration PRIVATE ${APEX_COMPILE_FLAGS})
+
+    # Binary Encoding & Bitwise Mapping Integration Test
+    add_executable(test_binary_bitwise_engine
+        tests/test_binary_bitwise_engine.cpp
+        src/host/bloom_filter.cpp
+        src/host/binary_manifest.cpp
+        src/host/bitwise_policy.cpp
+        src/host/integrity_verifier.cpp
+    )
+    target_include_directories(test_binary_bitwise_engine PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(test_binary_bitwise_engine PRIVATE
+        aarchgate
+        "-framework CoreFoundation"
+        "-framework Foundation"
+        "-framework Security"
+    )
+    target_compile_options(test_binary_bitwise_engine PRIVATE ${APEX_COMPILE_FLAGS})
+
+    # Build Acceleration live benchmark
+    add_executable(bench_build_acceleration
+        benchmarks/bench_build_acceleration.cpp
+        src/host/integrity_verifier.cpp
+        src/host/install_manifest.cpp
+        src/host/cars.cpp
+        src/host/file_oracle.cpp
+        src/host/http_cache.cpp
+        src/host/dep_graph.cpp
+        src/host/vm_pool.cpp
+        src/host/vm_snapshot_pool.cpp
+        src/host/vm_controller.mm
+        src/host/fsevent_watcher.mm
+        src/host/reputation_scorer.cpp
+        src/host/bloom_filter.cpp
+        src/host/binary_manifest.cpp
+        src/host/bitwise_policy.cpp
+    )
+    target_include_directories(bench_build_acceleration PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(bench_build_acceleration PRIVATE
+        aarchgate
+        "-framework Virtualization"
+        "-framework CoreServices"
+        "-framework CoreFoundation"
+        "-framework Foundation"
+        "-framework Security"
+        iceoryx_hoofs
+        iceoryx_posh
+    )
+    target_compile_options(bench_build_acceleration PRIVATE ${APEX_COMPILE_FLAGS})
 endif()
+

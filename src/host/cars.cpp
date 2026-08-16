@@ -22,6 +22,7 @@ ContentAddressableStore::ContentAddressableStore(const std::string& store_root) 
 
 void ContentAddressableStore::load_index() {
     std::lock_guard<std::mutex> lock(mutex_);
+    bloom_filter_.clear();
     if (!fs::exists(store_root_)) return;
     for (const auto& entry : fs::directory_iterator(store_root_)) {
         if (entry.is_directory()) {
@@ -47,6 +48,7 @@ void ContentAddressableStore::load_index() {
 #endif
             }
             index_[hash] = cars_entry;
+            bloom_filter_.insert_key(hash);
         }
     }
 }
@@ -64,11 +66,19 @@ std::string ContentAddressableStore::hash_to_slot_name(const std::string& hash) 
 }
 
 bool ContentAddressableStore::contains(const std::string& integrity_hash) const {
+    // Sub-2ns Bloom filter check before acquiring mutex
+    if (!bloom_filter_.may_contain_key(integrity_hash)) {
+        return false;
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     return index_.find(integrity_hash) != index_.end();
 }
 
 std::string ContentAddressableStore::get_slot_path(const std::string& integrity_hash) const {
+    // Sub-2ns Bloom filter check before acquiring mutex
+    if (!bloom_filter_.may_contain_key(integrity_hash)) {
+        return "";
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = index_.find(integrity_hash);
     if (it != index_.end()) {
@@ -96,6 +106,7 @@ std::string ContentAddressableStore::put(const std::string& integrity_hash, cons
     entry.slot_path = slot_path;
     entry.size_bytes = size;
     index_[integrity_hash] = entry;
+    bloom_filter_.insert_key(integrity_hash);
     
     return slot_path;
 }
