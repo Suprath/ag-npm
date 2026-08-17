@@ -5,6 +5,7 @@ class Aarchgate < Formula
   desc "Zero-Trust Micro-VM npm Package Sandbox for Apple Silicon"
   homepage "https://github.com/Suprath/ag-npm"
   url "https://github.com/Suprath/ag-npm.git", branch: "main"
+  version "3.0.0"
   head "https://github.com/Suprath/ag-npm.git"
   license "MIT"
 
