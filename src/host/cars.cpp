@@ -3,6 +3,9 @@
 #include <fstream>
 #include <cstdlib>
 #include <sys/stat.h>
+#ifdef __APPLE__
+#include <copyfile.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -119,7 +122,23 @@ bool ContentAddressableStore::clone_into(const std::string& integrity_hash, cons
         if (it == index_.end()) return false;
         slot_path = it->second.slot_path;
     }
+
     std::error_code ec;
+
+#ifdef __APPLE__
+    // High-performance APFS Copy-on-Write kernel reflink clone (sub-millisecond latency)
+    // Remove existing target if present, so copyfile creates dest_dir as identical clone root
+    if (fs::exists(dest_dir)) {
+        fs::remove_all(dest_dir, ec);
+    }
+    fs::create_directories(fs::path(dest_dir).parent_path(), ec);
+
+    int res = copyfile(slot_path.c_str(), dest_dir.c_str(), nullptr, COPYFILE_CLONE | COPYFILE_RECURSIVE);
+    if (res == 0) return true;
+#endif
+
+    // Fallback: standard filesystem recursive copy (non-APFS or cross-device mounts)
+    fs::create_directories(dest_dir, ec);
     fs::copy(slot_path, dest_dir, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
     return !ec;
 }

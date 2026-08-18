@@ -182,3 +182,25 @@ if(APPLE)
     endif()
     add_test(NAME IntegrationSandboxTests COMMAND test_integration_sandbox)
 endif()
+
+# Real-World Build Acceleration tests (v3.1.0)
+add_executable(test_realworld_acceleration
+    test_realworld_acceleration.cpp
+    ../src/host/cars.cpp
+    ../src/host/bloom_filter.cpp
+    ../src/host/parallel_extractor.cpp
+    ../src/host/fsevent_watcher.mm
+)
+target_include_directories(test_realworld_acceleration PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+)
+target_link_libraries(test_realworld_acceleration PRIVATE
+    aarchgate
+    "-framework CoreServices"
+    "-framework Foundation"
+)
+target_compile_options(test_realworld_acceleration PRIVATE ${APEX_COMPILE_FLAGS})
+add_test(NAME RealWorldAccelerationTests COMMAND test_realworld_acceleration)
+

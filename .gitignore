@@ -48,6 +48,11 @@ generated/
 *~
 .DS_Store
 
+# Node modules
+node_modules/
+npm-test/node_modules/
+*.node
+
 # CMake cache
 CMakeUserPresets.json
 CLAUDE.md

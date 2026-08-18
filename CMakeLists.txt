@@ -52,6 +52,7 @@ set(APEX_SOURCES
     src/host/audit_log.cpp
     src/host/reputation_scorer.cpp
     src/host/egress_firewall.cpp
+    src/host/parallel_extractor.cpp
 )
 
 if(APPLE)
